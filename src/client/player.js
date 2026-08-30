@@ -5,27 +5,52 @@ const { DirectLinkPlugin } = require('@distube/direct-link');
 const ffmpegStatic = require('ffmpeg-static');
 
 /**
- * Enhanced SpotifyPlugin with automatic scraper fallback
+ * Enhanced SpotifyPlugin with deep automatic scraper fallback
  * Handles private / dev-mode Spotify playlists seamlessly without throwing 404 errors.
  */
 class AutoFallbackSpotifyPlugin extends SpotifyPlugin {
-  async resolve(url, options) {
-    try {
-      return await super.resolve(url, options);
-    } catch (err) {
-      // Jika API menolak (misal playlist private), otomatis fallback ke mode scraper
-      if (this.api && this.api._tokenAvailable) {
-        this.api._tokenAvailable = false;
+  constructor(options = {}) {
+    super(options);
+    if (this.api && typeof this.api.getData === 'function') {
+      const originalGetData = this.api.getData.bind(this.api);
+      this.api.getData = async (url) => {
         try {
-          const fallbackResult = await super.resolve(url, options);
-          this.api._tokenAvailable = true;
-          return fallbackResult;
-        } catch (e2) {
-          this.api._tokenAvailable = true;
-          throw err;
+          return await originalGetData(url);
+        } catch (err) {
+          try {
+            const infoScraper = require('spotify-url-info')(globalThis.fetch);
+            const data = await infoScraper.getData(url);
+            const { type } = this.api.parseUrl(url);
+            if (type === 'track') {
+              return {
+                type: 'track',
+                id: this.api.parseUrl(data.uri || url).id,
+                name: data.title,
+                artists: [{ name: data.subtitle || data.artists?.[0]?.name }],
+                duration: data.duration,
+                thumbnail: data.coverArt?.sources?.[0]?.url,
+              };
+            }
+            const thumbnail = data.coverArt?.sources?.[0]?.url;
+            return {
+              type,
+              name: data.title,
+              thumbnail,
+              url,
+              tracks: (data.trackList || []).map((i) => ({
+                type: 'track',
+                id: this.api.parseUrl(i.uri).id,
+                name: i.title,
+                artists: [{ name: i.subtitle }],
+                duration: i.duration,
+                thumbnail,
+              })),
+            };
+          } catch (fallbackError) {
+            throw err;
+          }
         }
-      }
-      throw err;
+      };
     }
   }
 }
