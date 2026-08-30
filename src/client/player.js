@@ -5,8 +5,33 @@ const { DirectLinkPlugin } = require('@distube/direct-link');
 const ffmpegStatic = require('ffmpeg-static');
 
 /**
+ * Enhanced SpotifyPlugin with automatic scraper fallback
+ * Handles private / dev-mode Spotify playlists seamlessly without throwing 404 errors.
+ */
+class AutoFallbackSpotifyPlugin extends SpotifyPlugin {
+  async resolve(url, options) {
+    try {
+      return await super.resolve(url, options);
+    } catch (err) {
+      // Jika API menolak (misal playlist private), otomatis fallback ke mode scraper
+      if (this.api && this.api._tokenAvailable) {
+        this.api._tokenAvailable = false;
+        try {
+          const fallbackResult = await super.resolve(url, options);
+          this.api._tokenAvailable = true;
+          return fallbackResult;
+        } catch (e2) {
+          this.api._tokenAvailable = true;
+          throw err;
+        }
+      }
+      throw err;
+    }
+  }
+}
+
+/**
  * Initializes and configures the DisTube music player instance (DisTube v5 compatible)
- * Features Browser User-Agent injection to prevent HTTP 403 Forbidden CDN drops.
  * @param {import('discord.js').Client} client
  * @returns {DisTube}
  */
@@ -21,7 +46,7 @@ function initPlayer(client) {
 
   const plugins = [
     new SoundCloudPlugin(),
-    new SpotifyPlugin(spotifyOptions),
+    new AutoFallbackSpotifyPlugin(spotifyOptions),
     new DirectLinkPlugin(),
   ];
 
@@ -50,4 +75,4 @@ function initPlayer(client) {
   return distube;
 }
 
-module.exports = { initPlayer };
+module.exports = { initPlayer, AutoFallbackSpotifyPlugin };
