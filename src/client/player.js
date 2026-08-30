@@ -158,7 +158,8 @@ class UniversalSpotifyPlugin extends InfoExtractorPlugin {
   }
 
   createSearchQuery(song) {
-    return `${song.name} ${song.uploader?.name && song.uploader.name !== 'Spotify' ? song.uploader.name : ''}`.trim();
+    const artist = song.uploader?.name && song.uploader.name !== 'Spotify' ? song.uploader.name.split(',')[0].trim() : '';
+    return `${song.name} ${artist}`.trim();
   }
 
   getRelatedSongs() {
@@ -168,12 +169,23 @@ class UniversalSpotifyPlugin extends InfoExtractorPlugin {
 
 /**
  * Smart SoundCloud Plugin yang memfilter cuplikan 30 detik (SoundCloud Go+ Preview)
- * dan selalu memilih audio berdurasi penuh (durasi >= 60 detik) agar tidak pernah diskip!
+ * dan memiliki fallback otomatis jika judul lagu memiliki karakter spesial.
  */
 class SmartSoundCloudPlugin extends SoundCloudPlugin {
   async searchSong(query, options) {
-    const songs = await this.search(query, 'track', 10, options);
-    if (!songs || songs.length === 0) return null;
+    // 1. Bersihkan karakter spesial koma / kurung
+    const cleanQuery = query.replace(/[,()\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+    const songs = await this.search(cleanQuery, 'track', 10, options);
+    
+    // 2. Jika tidak ada hasil, fallback ke pencarian judul murni
+    if (!songs || songs.length === 0) {
+      const titleOnly = query.split('-')[0].split('(')[0].trim();
+      const fallbackSongs = await this.search(titleOnly, 'track', 5, options);
+      if (!fallbackSongs || fallbackSongs.length === 0) return null;
+      return fallbackSongs.find((s) => s.duration >= 60) || fallbackSongs[0];
+    }
+
+    // 3. Selalu pilih lagu dengan durasi >= 60 detik (bukan cuplikan 30 detik)
     const fullTrack = songs.find((s) => s.duration >= 60) || songs[0];
     return fullTrack;
   }
