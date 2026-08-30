@@ -103,7 +103,12 @@ class UniversalSpotifyPlugin extends InfoExtractorPlugin {
   }
 
   async resolve(url, options) {
-    const data = await scrapeSpotifyNative(url);
+    let cleanUrl = url;
+    if (typeof cleanUrl === 'string' && cleanUrl.includes('http')) {
+      const match = cleanUrl.match(/https?:\/\/[^\s\)\>]+/);
+      if (match) cleanUrl = match[0];
+    }
+    const data = await scrapeSpotifyNative(cleanUrl);
 
     if (data.type === 'track') {
       return new Song(
@@ -112,8 +117,8 @@ class UniversalSpotifyPlugin extends InfoExtractorPlugin {
           source: 'spotify',
           playFromSource: false,
           name: data.title,
-          id: url.split('/').pop().split('?')[0],
-          url: url,
+          id: cleanUrl.split('/').pop().split('?')[0],
+          url: cleanUrl,
           thumbnail: data.thumbnail,
           uploader: { name: 'Spotify' },
           duration: 200,
@@ -144,7 +149,7 @@ class UniversalSpotifyPlugin extends InfoExtractorPlugin {
       {
         source: 'spotify',
         name: data.title || 'Spotify Playlist',
-        url: url,
+        url: cleanUrl,
         thumbnail: data.thumbnail,
         songs: songs,
       },
@@ -162,13 +167,26 @@ class UniversalSpotifyPlugin extends InfoExtractorPlugin {
 }
 
 /**
+ * Smart SoundCloud Plugin yang memfilter cuplikan 30 detik (SoundCloud Go+ Preview)
+ * dan selalu memilih audio berdurasi penuh (durasi >= 60 detik) agar tidak pernah diskip!
+ */
+class SmartSoundCloudPlugin extends SoundCloudPlugin {
+  async searchSong(query, options) {
+    const songs = await this.search(query, 'track', 10, options);
+    if (!songs || songs.length === 0) return null;
+    const fullTrack = songs.find((s) => s.duration >= 60) || songs[0];
+    return fullTrack;
+  }
+}
+
+/**
  * Initializes and configures the DisTube music player instance (DisTube v5 compatible)
  * @param {import('discord.js').Client} client
  * @returns {DisTube}
  */
 function initPlayer(client) {
   const plugins = [
-    new SoundCloudPlugin(),
+    new SmartSoundCloudPlugin(),
     new UniversalSpotifyPlugin(),
     new DirectLinkPlugin(),
   ];
@@ -190,6 +208,13 @@ function initPlayer(client) {
           reconnect: '1',
           reconnect_streamed: '1',
           reconnect_delay_max: '5',
+        },
+        input: {
+          user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          reconnect: '1',
+          reconnect_streamed: '1',
+          reconnect_delay_max: '5',
+          reconnect_at_eof: '1',
         },
       },
     },
